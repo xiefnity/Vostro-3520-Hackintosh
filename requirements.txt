@@ -1,0 +1,8 @@
+# scripts/make-efi.py uses only the Python standard library (Python 3.8 or newer).
+# There is nothing to install with pip; this file exists so that tooling and
+# people can see that at a glance, and as the place to list a dependency if one
+# is ever added.
+#
+# The tools the script downloads on first run (macserial, ocvalidate,
+# macrecovery) come from the official OpenCore release and are verified by
+# SHA-256; they are cached in build/ and are not Python packages.

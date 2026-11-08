@@ -1,0 +1,11 @@
+# Keep every byte exactly as committed. The EFI tree is made of binaries, kext
+# bundles and plists; line-ending conversion on Windows could corrupt them.
+* -text
+
+# Plain-text project files use LF everywhere.
+*.py text eol=lf
+*.md text eol=lf
+*.txt text eol=lf
+LICENSE text eol=lf
+.gitignore text eol=lf
+.gitattributes text eol=lf

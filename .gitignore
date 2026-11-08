@@ -1,0 +1,75 @@
+# =============================================================================
+# PRIVATE - these must never be committed or published
+# =============================================================================
+# Your personal SMBIOS identity, plus the timestamped backups the script makes of it
+smbios.local
+smbios.local.*
+
+# Generated output: contains your personalised config.plist (with your identity)
+dist/
+
+# Build scratch space: downloads and the staging copy that holds your identity
+build/
+
+# =============================================================================
+# Logs, temporary files, caches
+# =============================================================================
+*.log
+*.tmp
+__pycache__/
+*.py[cod]
+
+# =============================================================================
+# Backups, archives and diagnostics - these can contain your identity or other
+# machine-specific data (OpenCore logs, SysReport, IORegistry/ACPI dumps)
+# =============================================================================
+*.zip
+*.7z
+*.tar
+*.tar.gz
+*.tgz
+*.bak
+*.orig
+*.rej
+*~
+backup/
+backups/
+Backup/
+EFI-backup*/
+EFI.bak*/
+diagnostics/
+Diagnostics/
+SysReport/
+opencore-*.txt
+*.ioreg
+IORegistry*
+DSDT.*
+acpidump/
+
+# =============================================================================
+# Only ONE configuration belongs in this repository: EFI/OC/config.plist.
+# Old experiments and variants (config-old.plist, config-prev-*.plist, ...) are
+# ignored on purpose - they would carry an unsanitised identity.
+# =============================================================================
+EFI/OC/*.plist
+!EFI/OC/config.plist
+
+# Apple's HFS+ driver is downloaded (and SHA-256 checked) at build time,
+# not redistributed from this repository.
+EFI/OC/Drivers/HfsPlus.efi
+
+# =============================================================================
+# Operating-system / editor noise and credentials
+# =============================================================================
+.DS_Store
+._*
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+.venv/
+venv/
+.env
+*.pem
+*.key
+*.p12
