@@ -49,7 +49,9 @@ These statements about the components that came with the original EFI are taken 
   `IntelBluetoothFirmware`, `SimpleHDA`, `WhateverXe`) are the work of their own authors and keep their own licenses,
   several of which are copyleft. This repository has not itemized their license texts or source locations: check each
   project's repository before redistributing them. [Documentation/Components.md](Documentation/Components.md) lists
-  the version of each.
+  the version of each. The one source location known here: `WhateverXe` is
+  [b00t0x/WhateverXe](https://github.com/b00t0x/WhateverXe) (BSD-3-Clause according to GitHub). Its companion macOS
+  package [WhateverXe-Graphics](https://github.com/b00t0x/WhateverXe-Graphics) is **not** included in this repository.
 
 ## Not included
 

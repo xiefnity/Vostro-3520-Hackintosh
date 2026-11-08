@@ -99,7 +99,38 @@ add itself to the firmware boot menu; the firmware has to boot the fallback `EFI
 
 Afterwards you should see the expected quick boot (about 10 seconds on the maintainer's unit).
 
-## 6. Known state after install
+## 6. GPU acceleration after installing macOS
+
+**You might have to install the [WhateverXe-Graphics](https://github.com/b00t0x/WhateverXe-Graphics/releases) package
+after installing macOS to get the GPU working.** The `WhateverXe` kext in this EFI is only half of the graphics
+setup; the package supplies the signed graphics driver files that macOS itself needs. The steps below are that
+project's own (from its README) - this repository does not ship, download or verify the package.
+
+1. **Be on macOS Tahoe 26.7 or newer** (the package's stated minimum) and boot with this EFI. Either build works:
+   both contain WhateverXe, the modified AMFIPass and the SIP setting `csr-active-config` = `0x803` that the package
+   requires. Update macOS first if your installer was older.
+2. **Download** `WhateverXe-Graphics-<version>.pkg` and `SHA256SUMS` from the latest release on the
+   [Releases page](https://github.com/b00t0x/WhateverXe-Graphics/releases).
+3. **Check the download** (sensible, optional): the hash from this command must match the line for the `.pkg` in
+   `SHA256SUMS`:
+   ```bash
+   shasum -a 256 ~/Downloads/WhateverXe-Graphics-*.pkg
+   ```
+4. **Open the package.** Its README says it is unsigned and not notarized, so macOS will warn before opening it; you
+   have to allow it yourself (usually *System Settings → Privacy & Security → Open Anyway* **(general macOS
+   behaviour)**). If the installer reports an error, resolve it before restarting.
+5. **Restart** once the installation succeeds. Afterwards you can look at *System Report → Graphics/Displays* to see
+   whether the GPU is listed with Metal support **(general macOS behaviour; what it shows on this GPU has not been
+   recorded here)**.
+6. **To remove it again:** download the project's `uninstall.sh`, run `sudo bash uninstall.sh` and restart. It
+   removes the package's graphics files and leaves the EFI alone.
+
+The project also describes an experimental *AutoPkg* way to apply the package during a fresh install. It needs an
+extra OpenCore kext (AutoPkgInstaller) that this EFI does not include, and it has not been tried here.
+
+More about the requirements and a note on version pairing: [Graphics](Graphics.md#after-installing-macos-the-whateverxe-graphics-package).
+
+## 7. Known state after install
 
 - **Sleep/wake is unreliable and disabled; it is not supported by this project.** Choose your own power settings
   with care. Settings that keep the machine from sleeping are the safe choice; the maintainer has not published a
@@ -109,7 +140,7 @@ Afterwards you should see the expected quick boot (about 10 seconds on the maint
 - To confirm your own identity is active, *About This Mac → System Report* shows the serial number from
   `smbios.local`.
 
-## 7. Updating later
+## 8. Updating later
 
 - Pull new repository changes and run `python3 scripts/make-efi.py` again: your `smbios.local` is reused, so the
   identity stays the same. The previous `dist/EFI` is moved to `dist/backups/`.

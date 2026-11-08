@@ -75,9 +75,16 @@ Upstream projects (only those the maintainers could confirm): [OpenCorePkg](http
 [BrightnessKeys](https://github.com/acidanthera/BrightnessKeys),
 [VoodooPS2](https://github.com/acidanthera/VoodooPS2), [VoodooI2C](https://github.com/VoodooI2C/VoodooI2C),
 [USBToolBox](https://github.com/USBToolBox/kext), [HoRNDIS](https://github.com/jwise/HoRNDIS),
-[OpenIntelWireless](https://github.com/OpenIntelWireless). WhateverXe, the modified AMFIPass, SimpleHDA,
-NootedGreen and the itlwm fork are third-party projects identified only by their bundle identifiers
-(`org.b00t0x.WhateverXe`, `cn.laobamac.SimpleHDA`, ...); check their authors' pages for their licenses.
+[OpenIntelWireless](https://github.com/OpenIntelWireless),
+[WhateverXe](https://github.com/b00t0x/WhateverXe) (BSD-3-Clause according to GitHub; bundle identifier
+`org.b00t0x.WhateverXe`). The modified AMFIPass, SimpleHDA, NootedGreen and the itlwm fork are third-party projects
+identified only by their bundle identifiers (`cn.laobamac.SimpleHDA`, ...); check their authors' pages for their
+licenses. WhateverXe's README points to an "AMFIPass 1.4.1 Mod" published in
+[WhateverXe-Graphics](https://github.com/b00t0x/WhateverXe-Graphics/tree/main/extras); this project has not verified
+that the shipped AMFIPass is that exact file.
+
+The macOS-side package [WhateverXe-Graphics](https://github.com/b00t0x/WhateverXe-Graphics) is **not** shipped here;
+see [Graphics](Graphics.md#after-installing-macos-the-whateverxe-graphics-package).
 
 ## ACPI (`EFI/OC/ACPI/`, all enabled)
 

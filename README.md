@@ -13,8 +13,11 @@ plus a build script that gives **every user their own, freshly generated SMBIOS 
 git clone https://github.com/xiefnity/Vostro-3520-Hackintosh.git
 cd Vostro-3520-Hackintosh
 python3 scripts/make-efi.py          # Windows: py -3 scripts\make-efi.py
-# -> dist/EFI is your personalised, validated EFI
+# -> dist/EFI: your personalised, validated fast-boot EFI (to install macOS first, add --installer - see below)
 ```
+
+New here? Follow the [Quick start](#quick-start-after-cloning) - it walks through the whole install, including the
+extra [GPU package](#gpu-acceleration-after-installing-macos) you might need after installing macOS.
 
 > **Use at your own risk.** This is community work, provided as-is (see [LICENSE](LICENSE)). Apple's license
 > restricts macOS to Apple-branded hardware; you are responsible for complying with it. Keep a backup of your
@@ -22,17 +25,61 @@ python3 scripts/make-efi.py          # Windows: py -3 scripts\make-efi.py
 
 ## Contents
 
+- [Quick start (after cloning)](#quick-start-after-cloning)
 - [What this project does](#what-this-project-does)
 - [Project status](#project-status)
 - [Build your EFI](#build-your-efi)
 - [SMBIOS identity](#smbios-identity)
 - [Why `smbios.local` must stay private](#why-smbioslocal-must-stay-private)
 - [Install the generated EFI](#install-the-generated-efi)
+- [GPU acceleration after installing macOS](#gpu-acceleration-after-installing-macos)
 - [Known limitations](#known-limitations)
 - [Development status](#development-status)
 - [Troubleshooting build errors](#troubleshooting-build-errors)
 - [Repository layout](#repository-layout)
 - [Third-party components and license](#third-party-components-and-license)
+
+## Quick start (after cloning)
+
+**You need:** a Dell Vostro 3520 (this configuration is for that machine), an erasable USB drive, a computer to build
+on (macOS, Windows or Linux) with **Git** and **Python 3.8+**, and an internet connection for the first run. Nothing
+in this project writes to a drive for you - you copy the folders yourself.
+
+1. **Clone and enter the folder** (skip this if you already have it):
+
+   ```bash
+   git clone https://github.com/xiefnity/Vostro-3520-Hackintosh.git
+   cd Vostro-3520-Hackintosh
+   ```
+
+2. **Build the EFI for the install USB.** The first run creates your own private SMBIOS identity in `smbios.local`:
+
+   ```bash
+   python3 scripts/make-efi.py --installer      # Windows: py -3 scripts\make-efi.py --installer
+   ```
+
+   Add `--recovery` if you will install from Windows or Linux (it also downloads macOS, about 1 GB). To test your setup
+   first, run `python3 scripts/make-efi.py --check`. The result is **`dist/installer/EFI`**.
+   **Back up `smbios.local`, and never share it or anything in `dist/`.**
+3. **Put it on a USB drive.** Use a GPT drive with a FAT32 partition and copy the `dist/installer/EFI` folder to its
+   root (plus `dist/com.apple.recovery.boot` if you used `--recovery`). On a Mac you can instead make the installer
+   from Apple's app - both ways are in [Installation](Documentation/Installation.md). In the laptop's BIOS, turn
+   Secure Boot off and set the storage mode to AHCI.
+4. **Boot the USB drive.** Press F12 at power-on, choose the drive's UEFI entry, pick the macOS installer in
+   OpenCore's picker and install macOS Tahoe.
+5. **Install the GPU package** if the GPU is not accelerated after installing:
+   [WhateverXe-Graphics](#gpu-acceleration-after-installing-macos).
+6. **Switch to the fast-boot EFI.** Build the normal EFI (your identity is reused) and copy `dist/EFI` to the internal
+   drive's EFI partition, as described in
+   [Installation, step 5](Documentation/Installation.md#5-after-installing-macos---install-opencore-on-the-internal-drive):
+
+   ```bash
+   python3 scripts/make-efi.py                  # builds dist/EFI
+   ```
+
+7. **Later:** run `git pull` and build again. `smbios.local` is reused, so your Mac keeps the same identity.
+
+If a build stops with an error, see [Troubleshooting build errors](#troubleshooting-build-errors).
 
 ## What this project does
 
@@ -79,7 +126,7 @@ is well-formed, not that your hardware behaves the same.
 | Component | Status | Notes |
 |---|---|---|
 | Intel Core i5-1235U | ✅ Working | 12th-generation Intel processor |
-| Intel Iris Xe Graphics | ✅ Working | Hardware acceleration using WhateverXe 0.7.0 - [Graphics](Documentation/Graphics.md) |
+| Intel Iris Xe Graphics | ✅ Working | Hardware acceleration using WhateverXe 0.7.0 (you might also need the [WhateverXe-Graphics package](#gpu-acceleration-after-installing-macos) in macOS) - [Graphics](Documentation/Graphics.md) |
 | Internal eDP Display | ✅ Working | Graphics acceleration and internal display output |
 | Wi-Fi | ✅ Working | AirportItlwm, Tahoe only - [Wi-Fi & Bluetooth](Documentation/WiFi-Bluetooth.md) |
 | Bluetooth | ✅ Working | IntelBluetoothFirmware, IntelBTPatcher and BlueToolFixup |
@@ -203,6 +250,27 @@ must be able to choose the installer. `--installer` shows the picker (5 s timeou
 normal EFI you can still reach the picker by holding a key such as **Esc** right after powering on (OpenCore's
 standard hotkey; the window is short and not tested on this laptop). The default boot is also **not verbose**.
 
+## GPU acceleration after installing macOS
+
+**You might have to install the [WhateverXe-Graphics](https://github.com/b00t0x/WhateverXe-Graphics/releases)
+package after installing macOS to get the GPU working.**
+
+Graphics acceleration has two parts that belong together: the `WhateverXe` kext, which is already inside this EFI, and
+the WhateverXe-Graphics package, which is installed *inside macOS* (under `/Library`) and is **not** part of this
+repository. WhateverXe's own installation steps include it: you install the latest Graphics package from within macOS
+and then restart. In short:
+
+1. Install macOS and boot it with this EFI. The package needs **macOS Tahoe 26.7 or newer**.
+2. Download `WhateverXe-Graphics-<version>.pkg` (and `SHA256SUMS`) from the
+   [Releases page](https://github.com/b00t0x/WhateverXe-Graphics/releases) and open the package. Its README says it is
+   unsigned and not notarized, so macOS will warn before opening it. Restart once the installation succeeds.
+3. To remove it again, run `sudo bash uninstall.sh` (the script from the same project) and restart.
+
+The steps, the checksum check and the requirements are in
+[Installation, step 6](Documentation/Installation.md#6-gpu-acceleration-after-installing-macos). One thing to know: this
+EFI ships WhateverXe 0.7.0 while newer releases exist - see the version note in
+[Graphics](Documentation/Graphics.md#after-installing-macos-the-whateverxe-graphics-package).
+
 ## Known limitations
 
 - **Sleep/wake is unreliable - disable sleep in macOS as a workaround**, otherwise the machine freezes. Not fixed,
@@ -217,7 +285,9 @@ standard hotkey; the window is short and not tested on this laptop). The default
   versions need different builds and are unsupported.
 - **Graphics depends on WhateverXe 0.7.0**, a third-party Lilu plug-in, and on a modified AMFIPass (the config
   comments say WhateverXe requires it). The EFI also runs with a reduced SIP setting (`csr-active-config`
-  `0x0803`) and `SecureBootModel=Disabled`. See [Graphics](Documentation/Graphics.md).
+  `0x0803`, which WhateverXe's own README calls for) and `SecureBootModel=Disabled`. After installing macOS you may
+  also need the separate [WhateverXe-Graphics package](#gpu-acceleration-after-installing-macos). See
+  [Graphics](Documentation/Graphics.md).
 - **One tested unit.** Different Wi-Fi/Bluetooth modules, panels, BIOS versions or codec revisions may behave
   differently or not work.
 - **Untested here:** Linux and Windows builds, Apple-silicon Macs as the build machine, and the features marked
