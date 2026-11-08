@@ -136,7 +136,6 @@ is well-formed, not that your hardware behaves the same.
 | Sleep / Wake | ⚠️ Unreliable | Just disable sleep from macOS, otherwise it will freeze. This project does not attempt to fix it |
 | Lid-close behaviour | ⚠️ Unverified | Requires further testing |
 | Display sleep / wake | ⚠️ Untested | Requires further testing |
-| Boot time | About 10 seconds | Picker hidden, no timeout, logging off, non-verbose boot |
 | Keyboard, trackpad, USB, Ethernet, battery, brightness keys, NVMe | Included, **not individually verified** | See [Components](Documentation/Components.md) |
 
 **Important:** This configuration is developed for the Dell Vostro 3520 with an Intel Core i5-1235U. Compatibility
