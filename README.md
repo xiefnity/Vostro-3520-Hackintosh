@@ -101,7 +101,8 @@ with other hardware configurations and laptop revisions is not guaranteed.
 space. No `pip install` is needed ([requirements.txt](requirements.txt) lists nothing on purpose).
 
 ```bash
-python3 scripts/make-efi.py                      # build dist/EFI
+python3 scripts/make-efi.py                      # build dist/EFI (fast boot: the OpenCore picker is hidden)
+python3 scripts/make-efi.py --installer          # build dist/installer/EFI (picker shown) - for the install USB
 python3 scripts/make-efi.py --check              # check dependencies + template, trial-build, keep nothing
 python3 scripts/make-efi.py --recovery           # also download the macOS recovery image (~1 GB)
 python3 scripts/make-efi.py --regenerate-smbios  # NEW identity - read the warning below first
@@ -110,7 +111,8 @@ python3 scripts/make-efi.py --regenerate-smbios  # NEW identity - read the warni
 | Option | Meaning |
 |---|---|
 | *(none)* | Build `dist/EFI`. Creates `smbios.local` on the first run, reuses it afterwards. |
-| `--check` | Verifies Python/OS support, downloads and verifies the OpenCore tools, validates the template and any existing `smbios.local`, then does a trial build with a throw-away identity. Writes nothing to `dist/` or `smbios.local`. |
+| `--installer` | Build `dist/installer/EFI` instead: the same EFI with the OpenCore picker **shown** (`ShowPicker=true`, `Timeout=5`) so you can choose the macOS installer. Those are the only two values that change, and the script checks that. Use it on the install USB. `dist/EFI` stays the fast-boot build and is never touched by this option. |
+| `--check` | Verifies Python/OS support, downloads and verifies the OpenCore tools, validates the template and any existing `smbios.local`, then does trial builds (normal and `--installer`) with a throw-away identity. Writes nothing to `dist/` or `smbios.local`. |
 | `--recovery` | Also downloads the latest macOS recovery from Apple to `dist/com.apple.recovery.boot` (for installing from Windows/Linux). Uses an all-zero MLB - your identity is not involved. |
 | `--regenerate-smbios` | Replaces your identity with a new one after a confirmation (`--yes` skips the prompt). The old file is kept as `smbios.local.bak-<time>`. |
 | `--sanitize FILE` | *Maintainers only:* writes the template `EFI/OC/config.plist` from a working config. See [Maintaining](Documentation/Maintaining.md). |
@@ -120,7 +122,8 @@ silicon - the tools are universal binaries), Linux (x86-64 only) and Windows. It
 on **macOS only**; the Linux and Windows paths select the `.linux` / `.exe` tools from the same official release
 but are untested - please report problems.
 
-**Output.** `dist/EFI` is the folder to copy to your USB drive. The build never writes to any drive itself.
+**Output.** `dist/installer/EFI` is the folder for the install USB and `dist/EFI` is the one for the internal drive
+afterwards. Both are ordinary `EFI` folders, so you copy them as they are. The build never writes to any drive itself.
 
 ## SMBIOS identity
 
@@ -188,14 +191,17 @@ and is missing `HfsPlus.efi`. Always use the output of the script.
 
 ## Install the generated EFI
 
-The short version: put the **contents of `dist/EFI`** in an `EFI` folder at the root of a FAT32 partition on a
-GPT-formatted USB drive, boot it, install macOS, then copy the same EFI to the internal EFI partition.
-The full walk-through - installer USB on macOS or via `--recovery` on Windows/Linux, BIOS settings, getting to the
-boot picker, post-install steps - is in **[Documentation/Installation.md](Documentation/Installation.md)**.
+The short version: build with **`--installer`** and put the resulting **`dist/installer/EFI`** folder at the root of a
+FAT32 partition on a GPT-formatted USB drive; boot it, install macOS, then build normally and copy **`dist/EFI`**
+to the internal EFI partition.
+The full walk-through - installer USB on macOS or via `--recovery` on Windows/Linux, BIOS settings, post-install
+steps - is in **[Documentation/Installation.md](Documentation/Installation.md)**.
 
-Two things that surprise people with this EFI: the boot picker is **hidden** and the timeout is **0** (part of the
-fast boot), so to reach the picker you hold a key such as **Esc** right after powering on (OpenCore's standard
-hotkey; the window is short - see Installation); and the default boot is **not verbose**.
+Why two builds: the normal EFI is tuned for a fast boot - the OpenCore boot picker is **hidden** and the timeout is
+**0**, so it boots its default entry at once. That is what you want day to day, but not while installing, when you
+must be able to choose the installer. `--installer` shows the picker (5 s timeout) and changes nothing else. With the
+normal EFI you can still reach the picker by holding a key such as **Esc** right after powering on (OpenCore's
+standard hotkey; the window is short and not tested on this laptop). The default boot is also **not verbose**.
 
 ## Known limitations
 
@@ -216,7 +222,8 @@ hotkey; the window is short - see Installation); and the default boot is **not v
   differently or not work.
 - **Untested here:** Linux and Windows builds, Apple-silicon Macs as the build machine, and the features marked
   "not individually verified" in the table above.
-- **No dual-boot guidance.** The picker is hidden by default; see Installation for how to reach it.
+- **No dual-boot guidance.** The normal EFI hides the picker (build with `--installer` to get one, or hold Esc at
+  power-on); see Installation.
 - **Debug OpenCore binaries.** The shipped OpenCore files are the official 1.0.8 DEBUG build with logging turned off.
 
 ## Development status

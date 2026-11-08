@@ -50,6 +50,10 @@ TEMPLATE = """<?xml version="1.0" encoding="UTF-8"?>
 </plist>
 """
 
+# The same template, plus the "hidden picker" setting the real template has (fast boot).
+TEMPLATE_PICKER = TEMPLATE.replace(
+    "\t\t\t<key>Timeout</key>", "\t\t\t<key>ShowPicker</key>\n\t\t\t<false/>\n\t\t\t<key>Timeout</key>")
+
 IDENTITY = {
     "SystemProductName": "MacBookPro16,2",
     "SystemSerialNumber": "C02TESTAAAA1",
@@ -81,6 +85,7 @@ class Base(unittest.TestCase):
         m.STAGING_DIR = m.BUILD_DIR / "staging"
         m.DIST_DIR = self.tmp / "dist"
         m.DIST_EFI = m.DIST_DIR / "EFI"
+        m.DIST_INSTALLER_EFI = m.DIST_DIR / "installer" / "EFI"
         m.BACKUP_DIR = m.DIST_DIR / "backups"
         m.SMBIOS_FILE = self.tmp / "smbios.local"
 
@@ -198,6 +203,101 @@ class PersonaliseTests(Base):
         self.assertBuildError(self.m.verify_personalised, as_text, template, IDENTITY)
         short = out.replace(good, base64.b64encode(IDENTITY["ROM"][:5]))
         self.assertBuildError(self.m.verify_personalised, short, template, IDENTITY)
+
+
+class InstallerTests(Base):
+    """--installer shows the OpenCore picker; the default build must keep the fast-boot (hidden picker) settings."""
+
+    BOOT = ("Misc", "Boot")
+    PICKER = ("Misc", "Boot", "ShowPicker")
+    TIMEOUT = ("Misc", "Boot", "Timeout")
+
+    def build(self, installer, text=TEMPLATE_PICKER):
+        return self.m.personalise(text.encode(), IDENTITY, installer=installer)
+
+    def test_installer_changes_exactly_the_picker_and_the_identity(self):
+        template = plistlib.loads(TEMPLATE_PICKER.encode())
+        out = self.build(True)
+        config = plistlib.loads(out)
+        boot = config["Misc"]["Boot"]
+        self.assertIs(boot["ShowPicker"], True)
+        self.assertIs(type(boot["Timeout"]), int)  # an integer, not a bool
+        self.assertEqual(boot["Timeout"], 5)
+        self.assertEqual(set(self.m.diff_paths(template, config)), self.m.IDENTITY_PATHS | {self.PICKER, self.TIMEOUT})
+        self.m.verify_personalised(out, template, IDENTITY, installer=True)
+        self.assertEqual(config["PlatformInfo"]["Generic"]["ROM"], IDENTITY["ROM"])  # identity is in the installer too
+
+    def test_installer_edits_only_those_two_lines_of_text(self):
+        normal, installer = self.build(False).decode().splitlines(), self.build(True).decode().splitlines()
+        self.assertEqual(len(normal), len(installer))
+        changed = [(a.strip(), b.strip()) for a, b in zip(normal, installer) if a != b]
+        self.assertEqual(changed, [("<false/>", "<true/>"), ("<integer>0</integer>", "<integer>5</integer>")])
+
+    def test_default_build_keeps_the_fast_boot_settings(self):
+        template = plistlib.loads(TEMPLATE_PICKER.encode())
+        out = self.build(False)
+        boot = plistlib.loads(out)["Misc"]["Boot"]
+        self.assertIs(boot["ShowPicker"], False)
+        self.assertEqual(boot["Timeout"], 0)
+        self.m.verify_personalised(out, template, IDENTITY)
+
+    def test_verify_rejects_the_wrong_variant(self):
+        template = plistlib.loads(TEMPLATE_PICKER.encode())
+        message = self.assertBuildError(self.m.verify_personalised, self.build(False), template, IDENTITY, installer=True)
+        self.assertIn("ShowPicker", message)  # an installer build that forgot the picker
+        message = self.assertBuildError(self.m.verify_personalised, self.build(True), template, IDENTITY)
+        self.assertIn("wrong places", message)  # a normal build that leaked the picker
+
+    def test_verify_rejects_a_wrong_timeout_and_any_collateral_change(self):
+        template = plistlib.loads(TEMPLATE_PICKER.encode())
+        wrong_timeout = self.build(True).replace(b"<integer>5</integer>", b"<integer>7</integer>")
+        self.assertIn("Timeout", self.assertBuildError(self.m.verify_personalised, wrong_timeout, template, IDENTITY,
+                                                       installer=True))
+        extra = self.build(True).replace(b"<key>Misc</key>", b"<key>Extra</key><true/><key>Misc</key>")
+        self.assertIn("wrong places", self.assertBuildError(self.m.verify_personalised, extra, template, IDENTITY,
+                                                            installer=True))
+
+    def test_installer_needs_each_setting_exactly_once(self):
+        self.assertBuildError(self.m.personalise, TEMPLATE.encode(), IDENTITY, installer=True)  # no ShowPicker at all
+        doubled = TEMPLATE_PICKER.replace("<key>Misc</key>", "<key>Misc</key><dict><key>Timeout</key>"
+                                          "<integer>1</integer></dict><key>Again</key>")
+        self.assertBuildError(self.m.personalise, doubled.encode(), IDENTITY, installer=True)
+
+    def test_installer_is_published_apart_from_the_fast_boot_efi(self):
+        def staged(content):
+            efi = self.m.STAGING_DIR / "EFI"
+            if efi.exists():
+                shutil.rmtree(str(efi))
+            (efi / "OC").mkdir(parents=True)
+            (efi / "OC" / "config.plist").write_text(content)
+            return efi
+
+        with mock.patch("builtins.print"):
+            self.m.publish(staged("fast"))
+            self.m.publish(staged("picker"), self.m.DIST_INSTALLER_EFI, "EFI-installer")
+            self.assertEqual((self.m.DIST_EFI / "OC" / "config.plist").read_text(), "fast")
+            self.assertEqual((self.m.DIST_INSTALLER_EFI / "OC" / "config.plist").read_text(), "picker")
+            self.m.publish(staged("picker2"), self.m.DIST_INSTALLER_EFI, "EFI-installer")
+        self.assertEqual((self.m.DIST_EFI / "OC" / "config.plist").read_text(), "fast")  # untouched by installer builds
+        backups = [p.name for p in self.m.BACKUP_DIR.iterdir()]
+        self.assertEqual(len(backups), 1)
+        self.assertTrue(backups[0].startswith("EFI-installer-"))
+
+    def test_installer_output_folder_is_named_efi_and_ignored_by_git(self):
+        m = load_module()
+        self.assertEqual(m.DIST_INSTALLER_EFI.name, "EFI")  # so it can be copied to the USB as it is
+        self.assertNotEqual(m.DIST_INSTALLER_EFI, m.DIST_EFI)
+        self.assertEqual(m.DIST_INSTALLER_EFI.relative_to(m.DIST_DIR).parts, ("installer", "EFI"))
+
+    def test_command_line_rules(self):
+        import contextlib
+        import io
+        self.assertTrue(self.m.parse_args(["--installer"]).installer)
+        self.assertTrue(self.m.parse_args(["--installer", "--recovery"]).installer)
+        self.assertFalse(self.m.parse_args([]).installer)
+        for argv in (["--installer", "--check"], ["--installer", "--sanitize", "x.plist"]):
+            with self.subTest(argv), contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+                self.m.parse_args(argv)
 
 
 class TemplateTests(Base):
@@ -409,6 +509,26 @@ class RepositoryHygieneTests(unittest.TestCase):
         for key, token in m.PLACEHOLDERS.items():
             self.assertEqual(generic[key], token)
         self.assertEqual(generic["SystemProductName"], "MacBookPro16,2")
+
+    def test_checked_in_template_keeps_fast_boot_and_supports_installer(self):
+        m = load_module()
+        raw = (SCRIPT.parent.parent / "EFI" / "OC" / "config.plist").read_bytes()
+        template = plistlib.loads(raw)
+        boot = template["Misc"]["Boot"]
+        # the fast-boot settings of the working EFI: the default build must keep them
+        self.assertIs(boot["ShowPicker"], False)
+        self.assertEqual(boot["Timeout"], 0)
+        self.assertEqual(boot["TakeoffDelay"], 500000)
+        identity = dict(IDENTITY)
+        normal = m.personalise(raw, identity)
+        m.verify_personalised(normal, template, identity)
+        installer = m.personalise(raw, identity, installer=True)
+        m.verify_personalised(installer, template, identity, installer=True)
+        shown = plistlib.loads(installer)["Misc"]["Boot"]
+        self.assertIs(shown["ShowPicker"], True)
+        self.assertEqual(shown["Timeout"], 5)
+        self.assertEqual(shown["TakeoffDelay"], 500000)  # nothing else in Boot moves
+        self.assertEqual(len(installer.splitlines()), len(raw.splitlines()))  # edited in place, no lines added
 
     def test_gitignore_protects_private_files(self):
         text = (SCRIPT.parent.parent / ".gitignore").read_text()

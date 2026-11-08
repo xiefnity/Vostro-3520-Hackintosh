@@ -59,6 +59,7 @@ I want to keep my iMessage/iCloud setup - what do I do? Put your existing identi
 |---|---|
 | `dist/EFI` already exists and differs from the new build | It is **moved** (not deleted) to `dist/backups/EFI-<timestamp>/`. Delete old backups yourself when you no longer need them. |
 | `dist/EFI` already equals the new build | Left untouched: `dist/EFI is already identical to this build`. |
+| The same for `--installer` | `dist/installer/EFI` is handled independently (backups are named `EFI-installer-<timestamp>`); an installer build never touches `dist/EFI`, and vice versa. |
 | Disk full / permission error mid-build | The previous `dist/EFI` is still in place; fix the problem and re-run. `build/staging/` is removed automatically. |
 
 ## Part 2 - Boot and run-time problems
@@ -68,8 +69,10 @@ mistakes in copying. Start with the simple checks.
 
 1. **Right EFI in the right place?** The drive must contain `EFI/BOOT/BOOTx64.efi` and `EFI/OC/...` at the root of a
    FAT32 partition. Use `dist/EFI`, not the repository's `EFI/`.
-2. **Reach the picker.** The picker is hidden and the timeout is 0: hold **Esc** immediately after power-on
-   **(general OpenCore behaviour; the window is only 0.5 s)**.
+2. **Reach the picker.** In the normal `dist/EFI` the picker is hidden and the timeout is 0: hold **Esc** immediately
+   after power-on **(general OpenCore behaviour; the window is only 0.5 s)**. If you cannot get there - or you are
+   installing - build with `python3 scripts/make-efi.py --installer` and boot from `dist/installer/EFI`, which always
+   shows the picker.
 3. **See what is happening.** Add `-v` to `boot-args` in the *template* config (see [Graphics](Graphics.md)),
    rebuild, and boot from the new EFI. Remove `-v` afterwards.
 4. **Get an OpenCore log (optional).** The shipped OpenCore binaries are the official 1.0.8 **DEBUG** build, so

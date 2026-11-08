@@ -2,6 +2,8 @@
 """Build a personalised OpenCore EFI for the Dell Vostro 3520 (Iris Xe, macOS Tahoe).
 
     python3 scripts/make-efi.py                      build dist/EFI (creates smbios.local on first run)
+    python3 scripts/make-efi.py --installer          build dist/installer/EFI: the same EFI with the OpenCore picker
+                                                     shown (use it on the install USB; dist/EFI is the fast-boot one)
     python3 scripts/make-efi.py --check              check dependencies + template, do a throw-away trial build
     python3 scripts/make-efi.py --regenerate-smbios  deliberately replace your SMBIOS identity (read the warning)
     python3 scripts/make-efi.py --recovery           also download the macOS recovery image (~1 GB)
@@ -15,7 +17,8 @@ identity.  This script
   4. fetches Apple's HfsPlus.efi from acidanthera/OcBinaryData (SHA-256 checked),
   5. replaces the placeholders in the staged config.plist and verifies the result,
   6. runs ocvalidate on it, and only then
-  7. moves it to dist/EFI (an existing dist/EFI is moved to dist/backups/, never deleted).
+  7. moves it to dist/EFI - or dist/installer/EFI with --installer (an existing one is moved to
+     dist/backups/, never deleted).
 
 Privacy: the identity (SystemSerialNumber, MLB, SystemUUID, ROM) is generated and used locally.
 Nothing in this script sends it anywhere; the only network traffic is downloading public files.
@@ -54,6 +57,7 @@ DEPS_DIR = BUILD_DIR / "deps"
 STAGING_DIR = BUILD_DIR / "staging"
 DIST_DIR = ROOT / "dist"                     # output, git-ignored
 DIST_EFI = DIST_DIR / "EFI"
+DIST_INSTALLER_EFI = DIST_DIR / "installer" / "EFI"  # --installer output: kept apart, still named "EFI"
 BACKUP_DIR = DIST_DIR / "backups"
 SMBIOS_FILE = ROOT / "smbios.local"          # your private identity, git-ignored
 
@@ -85,6 +89,9 @@ PLACEHOLDERS = {
 }
 IDENTITY_KEYS = tuple(PLACEHOLDERS)
 IDENTITY_PATHS = {("PlatformInfo", "Generic", key) for key in IDENTITY_KEYS}
+# --installer: the template hides the OpenCore picker (fast boot).  Installing macOS needs it, so this build option
+# switches exactly these two values and nothing else; verify_personalised() proves that.
+INSTALLER_OVERRIDES = {("Misc", "Boot", "ShowPicker"): True, ("Misc", "Boot", "Timeout"): 5}
 SMBIOS_FILE_KEYS = ("SystemProductName",) + IDENTITY_KEYS
 
 SERIAL_RE = re.compile(r"[A-Z0-9]{11,12}")
@@ -296,6 +303,24 @@ def find_identity_keys(node, path=()):
 
 def pretty(path):
     return "/".join(str(part) for part in path)
+
+
+_MISSING = object()
+
+
+def lookup(node, path):
+    """The value at `path` in a parsed plist, or _MISSING."""
+    for part in path:
+        try:
+            node = node[part]
+        except (KeyError, IndexError, TypeError):
+            return _MISSING
+    return node
+
+
+def same_value(a, b):
+    """Equal *and* the same plist type (so True is not 1 and a string is not data)."""
+    return type(a) is type(b) and a == b
 
 
 def load_template():
@@ -524,8 +549,24 @@ def save_new_identity(identity):
 
 
 # ----------------------------------------------------------------------------- personalising + verifying
-def personalise(raw, identity):
-    """Replace the four placeholders in the template text; ROM becomes a <data> element of six bytes."""
+def apply_installer_overrides(text):
+    """--installer: show the OpenCore picker and give it a timeout.  Edits the two values in the raw text, so every
+    other byte of the config stays as it is.  (Values mirror INSTALLER_OVERRIDES; verify_personalised checks them.)"""
+    edits = (
+        ("Misc/Boot/ShowPicker", re.compile(r"(<key>ShowPicker</key>\s*)<(?:true|false)\s*/>"), "<true/>"),
+        ("Misc/Boot/Timeout", re.compile(r"(<key>Timeout</key>\s*)<integer>\s*-?\d+\s*</integer>"),
+         "<integer>%d</integer>" % INSTALLER_OVERRIDES[("Misc", "Boot", "Timeout")]),
+    )
+    for name, pattern, element in edits:
+        text, count = pattern.subn(lambda match, element=element: match.group(1) + element, text)
+        if count != 1:
+            raise BuildError("--installer: expected exactly one %s setting in the template but found %d." % (name, count))
+    return text
+
+
+def personalise(raw, identity, installer=False):
+    """Replace the four placeholders in the template text; ROM becomes a <data> element of six bytes.
+    With installer=True the OpenCore picker is switched on as well (see INSTALLER_OVERRIDES)."""
     text = raw.decode("utf-8")
     elements = {
         PLACEHOLDERS["SystemSerialNumber"]: "<string>%s</string>" % identity["SystemSerialNumber"],
@@ -538,12 +579,14 @@ def personalise(raw, identity):
         text, count = pattern.subn(lambda _match, element=element: element, text)
         if count != 1:
             raise BuildError("expected exactly one %s in the template but found %d." % (token, count))
+    if installer:
+        text = apply_installer_overrides(text)
     return text.encode("utf-8")
 
 
-def verify_personalised(output, template, identity):
+def verify_personalised(output, template, identity, installer=False):
     """Fail unless the config holds exactly the intended identity (correct types) and differs from the
-    template in nothing else."""
+    template in nothing else - except, with installer=True, the two INSTALLER_OVERRIDES values."""
     for token in PLACEHOLDERS.values():
         if token.encode("ascii") in output:
             raise BuildError("unresolved placeholder %s remains in the generated config.plist." % token)
@@ -560,12 +603,19 @@ def verify_personalised(output, template, identity):
     rom = generic.get("ROM")
     if type(rom) is not bytes or len(rom) != 6 or rom != identity["ROM"]:
         raise BuildError("PlatformInfo/Generic/ROM must be exactly six bytes (<data>) and was not inserted correctly.")
+    expected = set(IDENTITY_PATHS)
+    if installer:
+        for path, wanted in INSTALLER_OVERRIDES.items():
+            if not same_value(lookup(config, path), wanted):
+                raise BuildError("installer option %s was not set correctly in the generated config.plist." % pretty(path))
+            if not same_value(lookup(template, path), wanted):
+                expected.add(path)  # the template differs here (fast boot), so this change is expected
     changed = set(diff_paths(template, config))
-    if changed != IDENTITY_PATHS:
-        unexpected = sorted(pretty(p) for p in changed - IDENTITY_PATHS)
-        missing = sorted(pretty(p) for p in IDENTITY_PATHS - changed)
+    if changed != expected:
+        unexpected = sorted(pretty(p) for p in changed - expected)
+        missing = sorted(pretty(p) for p in expected - changed)
         raise BuildError("generated config differs from the template in the wrong places (unexpected: %s; "
-                         "unchanged identity fields: %s)." % (unexpected or "none", missing or "none"))
+                         "expected changes that did not happen: %s)." % (unexpected or "none", missing or "none"))
 
 
 def scan_for_placeholders(efi):
@@ -617,7 +667,7 @@ def run_ocvalidate(config_path):
 
 
 # ----------------------------------------------------------------------------- build pipeline
-def stage_efi(identity, template_raw, template_config):
+def stage_efi(identity, template_raw, template_config, installer=False):
     """Create build/staging/EFI, personalised and validated.  The template itself is only ever read."""
     if STAGING_DIR.exists():
         shutil.rmtree(str(STAGING_DIR))
@@ -629,11 +679,15 @@ def stage_efi(identity, template_raw, template_config):
     shutil.copyfile(str(fetch(HFSPLUS[0], HFSPLUS[1], DEPS_DIR / "HfsPlus.efi")), str(drivers / "HfsPlus.efi"))
 
     config_path = efi / "OC" / "config.plist"
-    output = personalise(template_raw, identity)
-    verify_personalised(output, template_config, identity)
+    output = personalise(template_raw, identity, installer)
+    verify_personalised(output, template_config, identity, installer)
     config_path.write_bytes(output)
-    verify_personalised(config_path.read_bytes(), template_config, identity)  # re-check what is really on disk
-    say("  config.plist personalised: 4 SMBIOS fields set (ROM stored as 6 raw bytes), nothing else changed")
+    verify_personalised(config_path.read_bytes(), template_config, identity, installer)  # re-check what is on disk
+    if installer:
+        say("  config.plist personalised: 4 SMBIOS fields set (ROM stored as 6 raw bytes) and the OpenCore picker "
+            "enabled (ShowPicker=true, Timeout=5), nothing else changed")
+    else:
+        say("  config.plist personalised: 4 SMBIOS fields set (ROM stored as 6 raw bytes), nothing else changed")
 
     scan_for_placeholders(efi)
     say("  no unresolved placeholders anywhere in the EFI")
@@ -643,25 +697,26 @@ def stage_efi(identity, template_raw, template_config):
     return efi
 
 
-def publish(staged_efi):
-    """Move the staged EFI to dist/EFI, keeping any previous build in dist/backups/."""
-    DIST_DIR.mkdir(exist_ok=True)
-    if DIST_EFI.exists():
-        if tree_digest(DIST_EFI) == tree_digest(staged_efi):
-            say("  dist/EFI is already identical to this build - left untouched")
+def publish(staged_efi, dest=None, backup_label="EFI"):
+    """Move the staged EFI to `dest` (default dist/EFI), keeping any previous build in dist/backups/."""
+    dest = DIST_EFI if dest is None else dest
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    if dest.exists():
+        if tree_digest(dest) == tree_digest(staged_efi):
+            say("  %s is already identical to this build - left untouched" % rel(dest))
             shutil.rmtree(str(staged_efi))
             return False
-        backup = move_aside(DIST_EFI, BACKUP_DIR / ("EFI-" + timestamp()))
-        say("  previous dist/EFI moved to %s (delete it yourself once you no longer need it)" % rel(backup))
+        backup = move_aside(dest, BACKUP_DIR / ("%s-%s" % (backup_label, timestamp())))
+        say("  previous %s moved to %s (delete it yourself once you no longer need it)" % (rel(dest), rel(backup)))
     else:
         backup = None
     try:
-        shutil.move(str(staged_efi), str(DIST_EFI))
+        shutil.move(str(staged_efi), str(dest))
     except BaseException:
         if backup is not None:  # put the previous build back rather than leave dist/ without an EFI
-            if DIST_EFI.exists():
-                shutil.rmtree(str(DIST_EFI), ignore_errors=True)
-            shutil.move(str(backup), str(DIST_EFI))
+            if dest.exists():
+                shutil.rmtree(str(dest), ignore_errors=True)
+            shutil.move(str(backup), str(dest))
         raise
     return True
 
@@ -751,15 +806,20 @@ def parse_args(argv=None):
     parser.add_argument("--regenerate-smbios", action="store_true",
                         help="replace smbios.local with a NEW identity (asks for confirmation; the old file is kept)")
     parser.add_argument("--yes", action="store_true", help="answer the --regenerate-smbios confirmation with yes")
+    parser.add_argument("--installer", action="store_true",
+                        help="build dist/installer/EFI instead of dist/EFI: identical, except that the OpenCore picker "
+                             "is shown (ShowPicker=true, Timeout=5) so you can choose the installer; use it on the "
+                             "install USB, then put the normal dist/EFI on the internal drive")
     parser.add_argument("--recovery", action="store_true",
                         help="also download the latest macOS recovery image to dist/com.apple.recovery.boot")
     parser.add_argument("--sanitize", metavar="WORKING_CONFIG",
                         help="maintainers only: write the public template EFI/OC/config.plist from your working "
                              "config.plist (identity replaced by placeholders)")
     args = parser.parse_args(argv)
-    if args.check and (args.regenerate_smbios or args.recovery or args.sanitize):
-        parser.error("--check cannot be combined with other actions")
-    if args.sanitize and (args.regenerate_smbios or args.recovery):
+    if args.check and (args.regenerate_smbios or args.recovery or args.sanitize or args.installer):
+        parser.error("--check cannot be combined with other actions (it already trial-builds the --installer "
+                     "variant too)")
+    if args.sanitize and (args.regenerate_smbios or args.recovery or args.installer):
         parser.error("--sanitize cannot be combined with other actions")
     return args
 
@@ -795,28 +855,35 @@ def main(argv=None):
             say("  smbios.local is present and valid (it would be reused)")
         else:
             say("  no smbios.local yet - one will be generated on the first real build")
-        heading("Trial build with a temporary identity (nothing is kept)")
+        heading("Trial builds with a temporary identity - normal and --installer (nothing is kept)")
         try:
-            stage_efi(generate_identity(model), template_raw, template_config)
+            trial_identity = generate_identity(model)
+            say("  normal build:")
+            stage_efi(trial_identity, template_raw, template_config)
+            say("  --installer build:")
+            stage_efi(trial_identity, template_raw, template_config, installer=True)
         finally:
             shutil.rmtree(str(STAGING_DIR), ignore_errors=True)
         if tree_digest(SRC_EFI) != source_digest:
             raise BuildError("the source EFI/ changed during the check - this must never happen; please report it.")
-        say("\nAll checks passed.  Run again without --check to build dist/EFI.")
+        say("\nAll checks passed.  Run again without --check to build dist/EFI (or with --installer for the "
+            "install USB).")
         return 0
+
+    target = DIST_INSTALLER_EFI if args.installer else DIST_EFI
 
     heading("SMBIOS identity")
     identity, is_new = obtain_identity(model, args.regenerate_smbios, args.yes)
 
-    heading("Building and validating")
+    heading("Building and validating" + (" (--installer: OpenCore picker shown)" if args.installer else ""))
     try:
-        staged = stage_efi(identity, template_raw, template_config)
+        staged = stage_efi(identity, template_raw, template_config, installer=args.installer)
         if tree_digest(SRC_EFI) != source_digest:
             raise BuildError("the source EFI/ changed during the build - this must never happen; please report it.")
-        heading("Writing smbios.local and dist/EFI")
+        heading("Writing smbios.local and %s" % rel(target))
         if is_new:
             save_new_identity(identity)  # only now: the build validated, so the identity is worth keeping
-        changed = publish(staged)
+        changed = publish(staged, target, "EFI-installer" if args.installer else "EFI")
     finally:
         shutil.rmtree(str(STAGING_DIR), ignore_errors=True)  # holds a personalised config: never leave it behind
 
@@ -825,9 +892,13 @@ def main(argv=None):
         heading("macOS recovery image")
         recovery = download_recovery(model)
 
-    say("\nDone: %s%s" % (rel(DIST_EFI), "" if changed else " (unchanged)")
+    say("\nDone: %s%s" % (rel(target), "" if changed else " (unchanged)")
         + (" and %s" % rel(recovery) if recovery else ""))
     say("Copy the EFI folder to the root of a FAT32 partition (see Documentation/Installation.md).")
+    if args.installer:
+        say("This is the INSTALLER build: the OpenCore picker is shown (5 s timeout). Use it on the install USB only.")
+        say("Once macOS is installed, run again WITHOUT --installer and put dist/EFI on the internal EFI partition")
+        say("to get the fast boot back (hidden picker, no timeout).")
     say("Keep smbios.local and dist/ private: they contain your SMBIOS identity.")
     return 0
 

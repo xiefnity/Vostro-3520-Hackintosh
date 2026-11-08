@@ -10,11 +10,21 @@
 ```bash
 git clone https://github.com/xiefnity/Vostro-3520-Hackintosh.git
 cd Vostro-3520-Hackintosh
+python3 scripts/make-efi.py --installer    # dist/installer/EFI - for the install USB (shows the OpenCore picker)
+python3 scripts/make-efi.py                # dist/EFI - for the internal drive after the install (fast boot)
 python3 scripts/make-efi.py --recovery     # --recovery only if you will install from Windows/Linux (about 1 GB)
 ```
 
-Result: `dist/EFI` (and `dist/com.apple.recovery.boot` with `--recovery`). Never copy the repository's own `EFI/`
-folder: it holds placeholders and lacks `HfsPlus.efi`. Back up `smbios.local` somewhere private.
+You get **two** EFI folders with the **same** SMBIOS identity (`smbios.local` is shared):
+
+| Folder | Use it for | OpenCore picker |
+|---|---|---|
+| `dist/installer/EFI` | the install USB | **shown**, 5 s timeout, so you can choose the installer |
+| `dist/EFI` | the internal drive once macOS is installed | hidden, no timeout (fast boot) |
+
+They differ in exactly two config values (`Misc/Boot/ShowPicker` and `Timeout`); the script verifies that. With
+`--recovery` you also get `dist/com.apple.recovery.boot`. Never copy the repository's own `EFI/` folder: it holds
+placeholders and lacks `HfsPlus.efi`. Back up `smbios.local` somewhere private.
 
 ## 2. BIOS settings (general practice)
 
@@ -43,13 +53,14 @@ Use a USB drive you can erase, with a **GPT** partition table.
    ```bash
    sudo /Applications/Install\ macOS\ Tahoe.app/Contents/Resources/createinstallmedia --volume /Volumes/INSTALL
    ```
-4. Copy the **`EFI` folder inside `dist/`** to the root of `OPENCORE`.
+4. Copy the **`dist/installer/EFI`** folder (the installer build) to the root of `OPENCORE`.
 
 ### Option B - on Windows or Linux (recovery image)
 
 1. You built with `--recovery`, so `dist/com.apple.recovery.boot` exists.
 2. Format the USB drive as **GPT** with one **FAT32** partition.
-3. Copy `dist/EFI` **and** `dist/com.apple.recovery.boot` to the root of that partition. It should look like:
+3. Copy `dist/installer/EFI` (the installer build) **and** `dist/com.apple.recovery.boot` to the root of that
+   partition. It should look like:
    ```
    EFI/BOOT/BOOTx64.efi
    EFI/OC/...
@@ -62,20 +73,19 @@ Use a USB drive you can erase, with a **GPT** partition table.
 
 1. Plug in the USB drive, power on and press **F12** (Dell one-time boot menu) and choose the USB drive's **UEFI**
    entry.
-2. This EFI **hides the OpenCore picker and has no timeout**, so it boots its default entry straight away. If
-   it boots something you did not want (for example Windows), power off and, immediately after powering on, **hold
-   Esc** (OpenCore's standard hotkey; `Option`/`Alt` is the other one). Only a short window is available:
-   `TakeoffDelay` is 0.5 s. This hotkey behaviour is **(general practice)**; it has not been recorded as tested on
-   this unit.
-3. Choose the macOS installer / recovery entry.
+2. OpenCore shows its **boot picker** (this is the `--installer` build; if you used the normal `dist/EFI` instead,
+   the picker is hidden and the default entry boots straight away - then power off and, immediately after powering
+   on, **hold Esc**, OpenCore's standard hotkey; `Option`/`Alt` is the other one. That hotkey behaviour is
+   **(general practice)**; it has not been recorded as tested on this unit).
+3. Choose the macOS installer / recovery entry. If you do nothing, the picker boots its default entry after 5 s.
 4. In the installer, open *Disk Utility*, erase the target internal drive as **APFS / GUID Partition Map**, then run
    *Install macOS*. The machine restarts several times; each time, boot from the USB drive again and choose the
    installer or the new macOS disk entry as OpenCore shows it.
 
 ## 5. After installing macOS - install OpenCore on the internal drive
 
-Boot macOS from the USB drive once, then copy `dist/EFI` to the internal drive's EFI partition so the USB drive is
-no longer needed:
+Boot macOS from the USB drive once, then copy `dist/EFI` (the normal, fast-boot build - **not** `dist/installer/EFI`)
+to the internal drive's EFI partition so the USB drive is no longer needed:
 
 ```bash
 diskutil list                              # find the internal disk's "EFI" partition, e.g. disk0s1
